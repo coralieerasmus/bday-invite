@@ -1,0 +1,15 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Coralie//Bday Invite//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:coralie-bday-2026@coralieerasmus.com
+DTSTAMP:20261027T120000Z
+DTSTART:20261117T180000Z
+DTEND:20261117T220000Z
+SUMMARY:Coralie's Bday Party
+LOCATION:Philitelaan 67-47\, Eindhoven
+DESCRIPTION:Coralie themed bday. Food and drinks included. Dress code: ur coolest fit.
+END:VEVENT
+END:VCALENDAR

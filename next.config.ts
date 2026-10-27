@@ -1,20 +1,6 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next';
 
-const nextConfig: NextConfig = {
-  /* config options here */
-  experimental: {
-    agentFeedback: true,
-  },
-  cacheComponents: true,
-  partialPrefetching: true,
-  turbopack: {
-    rules: {
-      "*.css": {
-        loaders: ["@tailwindcss/turbopack"],
-        as: "*.css",
-      },
-    },
-  },
-};
+// Tailwind runs through postcss.config.mjs, so nothing extra is needed here.
+const nextConfig: NextConfig = {};
 
 export default nextConfig;
