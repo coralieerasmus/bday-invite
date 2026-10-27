@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { EVENT } from './event';
 
 /* ---------- edit the invite here ---------- */
 const INVITE = {
@@ -14,32 +15,23 @@ const INVITE = {
     ['RECEIPT', '#171126'],
     ['HOST', 'CORALIE'],
     ['GUEST', 'YOU'],
-    ['ENTRY', 'FREE'],
   ],
   items: [
     ['1', 'CORALIE THEME', '0,00'],
     ['∞', 'FOOD', '0,00'],
     ['∞', 'DRINKS', '0,00'],
-    ['1', 'DANCEFLOOR', '0,00'],
-    ['1', 'GOOD MEMORIES', '0,00'],
+    ['1', 'CURATED PLAYLIST', '0,00'],
+    ['4', 'HOURS, 19:00–23:00', '0,00'],
   ],
   subtotal: '0,00',
   tax: '0,00',
   total: '€0,00',
-  paid: 'PAID: GOOD VIBES ONLY',
+  paid: 'PAID BY: YOUR ATTENDANCE',
   highlight: '17 NOV · 7PM – 11PM',
   note: 'Dress code: ur coolest fit.',
   stamp: '17/11/26',
   serial: '1711 2026 CORA 0019',
   thanks: 'THANK YOU!',
-  // used by the calendar + maps buttons
-  event: {
-    title: "Coralie's Bday Party",
-    place: 'Philitelaan 67-47, Eindhoven',
-    details: 'Coralie themed bday. Food and drinks included. Dress code: ur coolest fit.',
-    startUtc: '20261117T180000Z', // 19:00 Amsterdam
-    endUtc: '20261117T220000Z', // 23:00 Amsterdam
-  },
 };
 
 /* ---------- open the right app on each phone ---------- */
@@ -53,25 +45,33 @@ function detectPlatform(): Platform {
   return 'other';
 }
 
-function links(platform: Platform) {
-  const { title, place, details, startUtc, endUtc } = INVITE.event;
-  const q = encodeURIComponent(place);
+const placeQuery = encodeURIComponent(EVENT.place);
+const GOOGLE_MAPS_APP = `comgooglemaps://?q=${placeQuery}`;
+const GOOGLE_MAPS_WEB = `https://www.google.com/maps/search/?api=1&query=${placeQuery}`;
+const APPLE_MAPS = `https://maps.apple.com/?q=${placeQuery}`;
+const GOOGLE_CALENDAR = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
+  EVENT.title,
+)}&dates=${EVENT.startUtc}/${EVENT.endUtc}&location=${placeQuery}&details=${encodeURIComponent(EVENT.details)}`;
 
-  // iPhone: the .ics opens Apple's "Add to Calendar" sheet.
-  // Android: Google Calendar's event screen (opens the app if installed).
-  // Desktop: the .ics downloads and opens in Outlook / Calendar.
-  const calendar =
-    platform === 'android'
-      ? `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title)}&dates=${startUtc}/${endUtc}&location=${q}&details=${encodeURIComponent(details)}`
-      : '/party.ics';
+/**
+ * iPhone: try the Google Maps app first. If it isn't installed the page is still
+ * visible a moment later, so fall back to Apple Maps.
+ */
+function openMapsOnIphone() {
+  let appOpened = false;
+  const onHide = () => {
+    if (document.hidden) appOpened = true;
+  };
+  document.addEventListener('visibilitychange', onHide);
+  window.addEventListener('pagehide', onHide);
 
-  // iPhone: Apple Maps. Android + desktop: Google Maps (opens the app on Android).
-  const maps =
-    platform === 'ios'
-      ? `https://maps.apple.com/?q=${q}`
-      : `https://www.google.com/maps/search/?api=1&query=${q}`;
+  window.location.href = GOOGLE_MAPS_APP;
 
-  return { calendar, maps };
+  setTimeout(() => {
+    document.removeEventListener('visibilitychange', onHide);
+    window.removeEventListener('pagehide', onHide);
+    if (!appOpened && !document.hidden) window.location.href = APPLE_MAPS;
+  }, 1200);
 }
 
 const PAPER = '#f8f7f3';
@@ -110,6 +110,28 @@ const paper: CSSProperties = {
     'linear-gradient(90deg, rgba(0,0,0,.06), transparent 4%, transparent 96%, rgba(0,0,0,.06))',
     'linear-gradient(180deg, transparent 61.8%, rgba(0,0,0,.035) 62%, rgba(255,255,255,.6) 62.4%, transparent 63%)',
     `linear-gradient(180deg, #e4e3df 0%, ${PAPER} 7%, #fdfdfb 28%, #f1f0ec 52%, #fdfdfb 78%, ${PAPER} 100%)`,
+  ].join(', '),
+};
+// thermal-print ink: a hair of blur and bleed so the type sits *in* the paper
+const ink: CSSProperties = {
+  color: '#242424',
+  textShadow: '0 0 .4px rgba(30,30,30,.6), 0 0 1.2px rgba(30,30,30,.18)',
+  filter: 'blur(.25px)',
+};
+// uneven print density: lightens the ink in faint patches, like a real thermal printer
+const inkFade: CSSProperties = {
+  backgroundImage: noise(0.5),
+  backgroundSize: '260px 260px',
+  mixBlendMode: 'screen',
+  opacity: 0.22,
+};
+// soft light from the top-left, falling off towards the bottom, plus a faint sheen
+const lighting: CSSProperties = {
+  background: [
+    'radial-gradient(130% 55% at 15% 0%, rgba(255,255,255,.45), transparent 60%)',
+    'linear-gradient(115deg, transparent 35%, rgba(255,255,255,.18) 48%, transparent 60%)',
+    'linear-gradient(180deg, transparent 55%, rgba(0,0,0,.07) 100%)',
+    'radial-gradient(140% 100% at 50% 50%, transparent 65%, rgba(0,0,0,.06) 100%)',
   ].join(', '),
 };
 // serrated tear-off edge
@@ -246,8 +268,12 @@ export default function Invite() {
   const [done, setDone] = useState(false);
   const [platform, setPlatform] = useState<Platform>('other');
   useEffect(() => setPlatform(detectPlatform()), []);
-  const { calendar, maps } = links(platform);
-  const onPhone = platform !== 'other';
+
+  // Android: Google Calendar's add-event screen. iPhone + desktop: the .ics from /calendar,
+  // which iPhones open in Apple's "Add to Calendar" screen.
+  const calendarHref = platform === 'android' ? GOOGLE_CALENDAR : '/calendar';
+  // Android + desktop: Google Maps (the app on Android). iPhone: handled in onClick.
+  const mapsHref = platform === 'ios' ? APPLE_MAPS : GOOGLE_MAPS_WEB;
   const { tick, unlock } = usePrinterSound();
 
   // make the headline lines fill the box width
@@ -366,9 +392,10 @@ export default function Invite() {
           <div className="absolute inset-x-8 bottom-5 h-2 rounded-full" style={slit} />
         </div>
 
-        {/* the feed clips the receipt so it looks like it comes out of the slot;
-            side and bottom padding leave room for the drop shadow */}
-        <div className="relative z-10 -mt-6 overflow-hidden px-8 pb-14">
+        {/* the feed starts right at the slit and sits in front of the housing, so the paper
+            comes out of the slot (its top edge is clipped there); side and bottom padding
+            leave room for the drop shadow */}
+        <div className="relative z-30 -mt-[22px] overflow-hidden px-8 pb-14">
           <div
             ref={shadeRef}
             aria-hidden="true"
@@ -381,7 +408,11 @@ export default function Invite() {
             aria-label="Birthday invitation"
             className="relative w-[360px] max-w-[82vw] will-change-transform [filter:drop-shadow(0_2px_2px_rgba(0,0,0,.4))_drop-shadow(0_20px_24px_rgba(0,0,0,.6))] [transform:translateY(-100%)]"
           >
-            <div className="px-7 pb-7 pt-12 text-[12.5px] leading-[1.6] tracking-[.01em] sm:px-9" style={paper}>
+            <div
+              className="relative px-7 pb-7 pt-12 text-[12.5px] leading-[1.6] tracking-[.01em] sm:px-9"
+              style={paper}
+            >
+              <div style={ink}>
               {/* store header */}
               <div className="flex flex-col items-center text-center">
                 <Logo className="block w-14" />
@@ -470,6 +501,11 @@ export default function Invite() {
               <p className="mt-5 text-center font-display text-[17px] font-extrabold italic tracking-[.06em]">
                 {INVITE.thanks}
               </p>
+              </div>
+
+              {/* realism layers on top of the print */}
+              <div aria-hidden="true" className="pointer-events-none absolute inset-0" style={inkFade} />
+              <div aria-hidden="true" className="pointer-events-none absolute inset-0" style={lighting} />
             </div>
 
             {/* serrated tear-off edge */}
@@ -484,18 +520,25 @@ export default function Invite() {
           }`}
         >
           <a
-            href={calendar}
+            href={calendarHref}
             // no download attribute: on iPhone that would save the file instead of opening Calendar
-            {...(platform === 'android' && { target: '_blank', rel: 'noopener noreferrer' })}
+            target={platform === 'android' ? '_blank' : undefined}
+            rel={platform === 'android' ? 'noopener noreferrer' : undefined}
             className={`${button} text-[#111] hover:brightness-110`}
             style={{ background: LIME }}
           >
             Add to calendar
           </a>
           <a
-            href={maps}
+            href={mapsHref}
+            onClick={(e) => {
+              if (platform !== 'ios') return;
+              e.preventDefault();
+              openMapsOnIphone();
+            }}
             // on phones, open straight in the maps app; on desktop, a new tab
-            {...(!onPhone && { target: '_blank', rel: 'noopener noreferrer' })}
+            target={platform === 'other' ? '_blank' : undefined}
+            rel={platform === 'other' ? 'noopener noreferrer' : undefined}
             className={`${button} text-[#111] hover:brightness-110`}
             style={{ background: LIME }}
           >
