@@ -499,7 +499,6 @@ export default function Invite() {
               className="absolute inset-x-0 top-[92px] z-40 animate-pulse text-center font-display text-xs font-bold tracking-[.4em] text-white/70"
             >
               TAP TO PRINT
-              <span className="mt-2 block text-[10px] font-normal tracking-[.25em] text-white/35">sound on</span>
             </p>
           )}
           <div
