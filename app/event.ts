@@ -1,6 +1,6 @@
 // Party details shared by the page (buttons) and the /calendar route (the .ics file).
 export const EVENT = {
-  title: "Coralie's Bday Party",
+  title: "Coralie's 22nd Bday",
   place: 'Philitelaan 67-47, Eindhoven',
   details: 'Coralie themed bday. Food and drinks included. Dress code: ur coolest fit.',
   startUtc: '20261117T180000Z', // 19:00 Amsterdam

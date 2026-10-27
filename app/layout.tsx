@@ -25,7 +25,7 @@ const spaceMono = Space_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Coralie's Bday — You're Invited",
+  title: "Coralie's 22nd Bday — You're Invited",
   description: '17 November, 7–11PM at Philitelaan 67-47. Food and drinks. Coralie themed.',
 };
 

@@ -8,7 +8,7 @@ const INVITE = {
   intro: "YOU'RE INVITED",
   tagline: 'ONE NIGHT ONLY',
   address: 'Philitelaan 67-47, Eindhoven',
-  headline: ["CORALIE'S", 'BDAY PARTY'],
+  headline: ["CORALIE'S", '22ND BDAY'],
   meta: [
     ['DATE', '17/11/26'],
     ['TIME', '19:00'],
