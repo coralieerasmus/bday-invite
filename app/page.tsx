@@ -109,14 +109,14 @@ const paper: CSSProperties = {
     noise(0.22),
     'linear-gradient(90deg, rgba(0,0,0,.06), transparent 4%, transparent 96%, rgba(0,0,0,.06))',
     'linear-gradient(180deg, transparent 61.8%, rgba(0,0,0,.035) 62%, rgba(255,255,255,.6) 62.4%, transparent 63%)',
-    `linear-gradient(180deg, #e4e3df 0%, ${PAPER} 7%, #fdfdfb 28%, #f1f0ec 52%, #fdfdfb 78%, ${PAPER} 100%)`,
+    `linear-gradient(180deg, ${PAPER} 0%, #fdfdfb 28%, #f1f0ec 52%, #fdfdfb 78%, ${PAPER} 100%)`,
   ].join(', '),
+  boxShadow: '0 1px 2px rgba(0,0,0,.45), 0 22px 30px -12px rgba(0,0,0,.75)',
 };
 // thermal-print ink: a hair of blur and bleed so the type sits *in* the paper
 const ink: CSSProperties = {
   color: '#242424',
-  textShadow: '0 0 .4px rgba(30,30,30,.6), 0 0 1.2px rgba(30,30,30,.18)',
-  filter: 'blur(.25px)',
+  textShadow: '0 0 .4px rgba(30,30,30,.55), 0 0 1px rgba(30,30,30,.15)',
 };
 // uneven print density: lightens the ink in faint patches, like a real thermal printer
 const inkFade: CSSProperties = {
@@ -140,7 +140,7 @@ const teeth: CSSProperties = {
 };
 // shadow where the paper comes out from under the slot
 const exitShade: CSSProperties = {
-  background: 'linear-gradient(180deg, rgba(0,0,0,.35) 0%, rgba(0,0,0,.1) 35%, transparent 100%)',
+  background: 'linear-gradient(180deg, rgba(0,0,0,.22) 0%, rgba(0,0,0,.06) 30%, transparent 100%)',
 };
 const dashed: CSSProperties = {
   background: `repeating-linear-gradient(90deg, ${INK} 0 4px, transparent 4px 7px)`,
@@ -294,7 +294,7 @@ export default function Invite() {
     const id = ++printId.current;
     const height = receipt.offsetHeight;
     const setPos = (fed: number) => {
-      receipt.style.transform = `translateY(${fed - height}px)`;
+      receipt.style.transform = `translateY(${Math.round(fed - height)}px)`;
       // only show the exit shadow once there's paper under it
       shade.style.opacity = String(Math.min(1, fed / 50));
     };
@@ -311,23 +311,13 @@ export default function Invite() {
     await wait(700); // a beat before the printer wakes up
     if (id !== printId.current) return;
 
-    const buzz = printer.animate(
-      [
-        { transform: 'translate(0, 0)' },
-        { transform: 'translate(.5px, -.3px)' },
-        { transform: 'translate(-.5px, .3px)' },
-        { transform: 'translate(0, 0)' },
-      ],
-      { duration: 90, iterations: Infinity },
-    );
+    // only hint the browser while moving; leaving it on keeps the receipt soft on iPhone
+    receipt.style.willChange = 'transform';
 
     const chunks = 42;
     let fed = 0;
     while (fed < height) {
-      if (id !== printId.current) {
-        buzz.cancel();
-        return;
-      }
+      if (id !== printId.current) return;
       const step = Math.min(height - fed, (height / chunks) * (0.7 + Math.random() * 0.6));
       const ms = 55 + Math.random() * 35;
       tick(ms);
@@ -336,8 +326,9 @@ export default function Invite() {
       // tiny stutter between feeds, sometimes a longer "thinking" pause
       await wait(Math.random() < 0.08 ? 180 + Math.random() * 160 : 18 + Math.random() * 40);
     }
-    buzz.cancel();
     setPos(height);
+    receipt.style.transform = 'none';
+    receipt.style.willChange = 'auto';
 
     await wait(250);
     if (id === printId.current) setDone(true);
@@ -382,37 +373,32 @@ export default function Invite() {
       <div className="flex flex-col items-center px-4 pb-16 pt-12 sm:pt-16">
         <p className="mb-8 font-display text-xs font-bold tracking-[.45em] text-white/60">{INVITE.intro}</p>
 
-        {/* chrome printer housing with the slot */}
-        <div
-          ref={printerRef}
-          aria-hidden="true"
-          className="relative z-20 h-16 w-[440px] max-w-[94vw] rounded-2xl"
-          style={housing}
-        >
-          <div className="absolute inset-x-8 bottom-5 h-2 rounded-full" style={slit} />
-        </div>
+        {/* printer: housing at the back, paper in the middle, slit on top,
+            so the paper slides out from under the slit's lower edge */}
+        <div className="relative flex w-[440px] max-w-[94vw] flex-col items-center">
+          <div ref={printerRef} aria-hidden="true" className="relative z-10 h-16 w-full rounded-2xl" style={housing} />
+          <div aria-hidden="true" className="absolute inset-x-8 top-9 z-30 h-2 rounded-full" style={slit} />
 
-        {/* the feed starts right at the slit and sits in front of the housing, so the paper
-            comes out of the slot (its top edge is clipped there); side and bottom padding
-            leave room for the drop shadow */}
-        <div className="relative z-30 -mt-[22px] overflow-hidden px-8 pb-14">
+        {/* the feed starts inside the slit; it clips the paper so it only shows once it's out.
+            side and bottom padding leave room for the shadow */}
+        <div className="relative z-20 -mt-[22px] overflow-hidden px-8 pb-14">
           <div
             ref={shadeRef}
             aria-hidden="true"
-            className="pointer-events-none absolute inset-x-8 top-0 z-10 h-16 opacity-0"
+            className="pointer-events-none absolute inset-x-8 top-0 z-10 h-10 opacity-0"
             style={exitShade}
           />
 
           <article
             ref={receiptRef}
             aria-label="Birthday invitation"
-            className="relative w-[360px] max-w-[82vw] will-change-transform [filter:drop-shadow(0_2px_2px_rgba(0,0,0,.4))_drop-shadow(0_20px_24px_rgba(0,0,0,.6))] [transform:translateY(-100%)]"
+            className="relative w-[360px] max-w-[82vw] [transform:translateY(-100%)]"
           >
             <div
               className="relative px-7 pb-7 pt-12 text-[12.5px] leading-[1.6] tracking-[.01em] sm:px-9"
               style={paper}
             >
-              <div style={ink}>
+              <div className="sm:[filter:blur(.25px)]" style={ink}>
               {/* store header */}
               <div className="flex flex-col items-center text-center">
                 <Logo className="block w-14" />
@@ -511,6 +497,7 @@ export default function Invite() {
             {/* serrated tear-off edge */}
             <div aria-hidden="true" className="h-2" style={teeth} />
           </article>
+        </div>
         </div>
 
         {/* shows once the receipt is fully printed */}
