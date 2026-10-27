@@ -192,56 +192,132 @@ function Barcode({ seed }: { seed: string }) {
   );
 }
 
-/* ---------- printer sound (plays once the browser allows audio) ---------- */
+/* ---------- receipt printer sound, made in the browser (no audio files) ---------- */
+type Sound = {
+  ctx: AudioContext;
+  noise: AudioBuffer;
+  out: GainNode;
+  motor?: { osc: OscillatorNode; gain: GainNode };
+};
+
+const running = (a: Sound | null) => (a && a.ctx.state === 'running' ? a : null);
+
+/** A short burst of filtered noise: paper rustle, the cutter blade, the clunk. */
+function noiseBurst(a: Sound, at: number, dur: number, type: BiquadFilterType, freq: number, q: number, peak: number) {
+  const src = a.ctx.createBufferSource();
+  src.buffer = a.noise;
+  const filter = a.ctx.createBiquadFilter();
+  filter.type = type;
+  filter.frequency.value = freq;
+  filter.Q.value = q;
+  const gain = a.ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, at);
+  gain.gain.exponentialRampToValueAtTime(peak, at + 0.004);
+  gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  src.connect(filter).connect(gain).connect(a.out);
+  src.start(at, Math.random() * 0.5, dur + 0.02);
+}
+
 function usePrinterSound() {
-  const audio = useRef<{ ctx: AudioContext; buffer: AudioBuffer } | null>(null);
+  const audio = useRef<Sound | null>(null);
 
-  const get = useCallback(() => {
-    if (audio.current) return audio.current;
-    const Ctx =
-      window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctx) return null;
-    const ctx = new Ctx();
-    const buffer = ctx.createBuffer(1, ctx.sampleRate * 0.2, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-    audio.current = { ctx, buffer };
-    return audio.current;
-  }, []);
-
+  // has to run inside a tap/click: phones only allow sound that starts from one
   const unlock = useCallback(() => {
-    const a = get();
-    if (a?.ctx.state === 'suspended') void a.ctx.resume();
-  }, [get]);
-
-  const tick = useCallback((ms: number) => {
-    const a = audio.current;
-    if (!a || a.ctx.state !== 'running') return;
-    const { ctx, buffer } = a;
-    const src = ctx.createBufferSource();
-    src.buffer = buffer;
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.frequency.value = 2400 + Math.random() * 900;
-    filter.Q.value = 1.4;
-    const gain = ctx.createGain();
-    const t = ctx.currentTime;
-    gain.gain.setValueAtTime(0, t);
-    gain.gain.linearRampToValueAtTime(0.12, t + 0.008);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + ms / 1000);
-    src.connect(filter).connect(gain).connect(ctx.destination);
-    src.start(t);
-    src.stop(t + ms / 1000 + 0.02);
+    if (!audio.current) {
+      const Ctx =
+        window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      const noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+      const data = noise.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+      const out = ctx.createGain();
+      out.gain.value = 0.7;
+      out.connect(ctx.destination);
+      audio.current = { ctx, noise, out };
+    }
+    if (audio.current.ctx.state === 'suspended') void audio.current.ctx.resume();
   }, []);
 
-  // browsers block sound until the visitor interacts with the page
+  // one line of printing: a low stepper-motor "brrt" plus a soft paper rustle
+  const tick = useCallback((ms: number) => {
+    const a = running(audio.current);
+    if (!a) return;
+    const { ctx } = a;
+    const t = ctx.currentTime;
+    const d = ms / 1000;
+    const pitch = 190 + Math.random() * 40;
+
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(pitch, t);
+    osc.frequency.linearRampToValueAtTime(pitch * 0.94, t + d);
+    // cut the harsh top end so it's a grind, not a whine
+    const band = ctx.createBiquadFilter();
+    band.type = 'lowpass';
+    band.frequency.value = 700;
+    band.Q.value = 0.7;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.09, t + 0.008);
+    gain.gain.setValueAtTime(0.09, t + d * 0.7);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    osc.connect(band).connect(gain).connect(a.out);
+    osc.start(t);
+    osc.stop(t + d + 0.02);
+
+    noiseBurst(a, t, d, 'lowpass', 1100 + Math.random() * 200, 0.7, 0.035);
+  }, []);
+
+  // low motor hum that runs while the paper feeds
+  const motorStart = useCallback(() => {
+    const a = running(audio.current);
+    if (!a || a.motor) return;
+    const { ctx } = a;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.value = 75;
+    const low = ctx.createBiquadFilter();
+    low.type = 'lowpass';
+    low.frequency.value = 300;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.03, t + 0.15);
+    osc.connect(low).connect(gain).connect(a.out);
+    osc.start(t);
+    a.motor = { osc, gain };
+  }, []);
+
+  const motorStop = useCallback(() => {
+    const a = audio.current;
+    if (!a?.motor) return;
+    const { osc, gain } = a.motor;
+    const t = a.ctx.currentTime;
+    gain.gain.cancelScheduledValues(t);
+    gain.gain.setValueAtTime(Math.max(gain.gain.value, 0.0001), t);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+    osc.stop(t + 0.25);
+    a.motor = undefined;
+  }, []);
+
+  // the auto-cutter at the end: a quick blade "tsk" and a small clunk
+  const cut = useCallback(() => {
+    const a = running(audio.current);
+    if (!a) return;
+    const t = a.ctx.currentTime;
+    noiseBurst(a, t, 0.05, 'bandpass', 1400, 0.8, 0.14);
+    noiseBurst(a, t + 0.06, 0.05, 'lowpass', 350, 1, 0.22);
+  }, []);
+
+  // any tap anywhere also wakes the sound up
   useEffect(() => {
     const events = ['pointerdown', 'keydown', 'touchstart'] as const;
     events.forEach((e) => window.addEventListener(e, unlock, { once: true, passive: true }));
     return () => events.forEach((e) => window.removeEventListener(e, unlock));
   }, [unlock]);
 
-  return { tick, unlock };
+  return { unlock, tick, motorStart, motorStop, cut };
 }
 
 /* ---------- helpers ---------- */
@@ -274,7 +350,9 @@ export default function Invite() {
   const calendarHref = platform === 'android' ? GOOGLE_CALENDAR : '/calendar';
   // Android + desktop: Google Maps (the app on Android). iPhone: handled in onClick.
   const mapsHref = platform === 'ios' ? APPLE_MAPS : GOOGLE_MAPS_WEB;
-  const { tick, unlock } = usePrinterSound();
+  const { unlock, tick, motorStart, motorStop, cut } = usePrinterSound();
+  const [started, setStarted] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   // make the headline lines fill the box width
   const fitTitle = useCallback(() => {
@@ -313,11 +391,16 @@ export default function Invite() {
 
     // only hint the browser while moving; leaving it on keeps the receipt soft on iPhone
     receipt.style.willChange = 'transform';
+    setPrinting(true);
+    motorStart();
 
     const chunks = 42;
     let fed = 0;
     while (fed < height) {
-      if (id !== printId.current) return;
+      if (id !== printId.current) {
+        motorStop();
+        return;
+      }
       const step = Math.min(height - fed, (height / chunks) * (0.7 + Math.random() * 0.6));
       const ms = 55 + Math.random() * 35;
       tick(ms);
@@ -329,24 +412,35 @@ export default function Invite() {
     setPos(height);
     receipt.style.transform = 'none';
     receipt.style.willChange = 'auto';
+    motorStop();
+    setPrinting(false);
+    await wait(120);
+    cut();
 
     await wait(250);
     if (id === printId.current) setDone(true);
-  }, [tick]);
+  }, [tick, motorStart, motorStop, cut]);
 
-  // print on load, once the fonts are in (so the headline measures correctly)
+  // size the headline once the fonts are in; printing waits for the first tap
   useEffect(() => {
     let cancelled = false;
     document.fonts.ready.then(() => {
-      if (cancelled) return;
-      fitTitle();
-      void print();
+      if (!cancelled) fitTitle();
     });
     return () => {
       cancelled = true;
       printId.current++; // stops a print that's mid-way
     };
-  }, [fitTitle, print]);
+  }, [fitTitle]);
+
+  // the first tap starts the print *and* the sound (phones only allow sound after a tap)
+  const start = () => {
+    if (started) return;
+    unlock();
+    fitTitle();
+    setStarted(true);
+    void print();
+  };
 
   // keep the headline fitted when the screen size changes
   useEffect(() => {
@@ -370,32 +464,67 @@ export default function Invite() {
 
   return (
     <main className="min-h-dvh overflow-x-hidden font-mono antialiased" style={{ ...bg, color: INK }}>
+      {!started && (
+        <button
+          type="button"
+          onClick={start}
+          aria-label="Tap to print your invitation"
+          className="fixed inset-0 z-50 cursor-pointer bg-transparent"
+        />
+      )}
       <div className="flex flex-col items-center px-4 pb-16 pt-12 sm:pt-16">
         <p className="mb-8 font-display text-xs font-bold tracking-[.45em] text-white/60">{INVITE.intro}</p>
 
-        {/* printer: housing at the back, paper in the middle, slit on top,
-            so the paper slides out from under the slit's lower edge */}
-        <div className="relative flex w-[440px] max-w-[94vw] flex-col items-center">
-          <div ref={printerRef} aria-hidden="true" className="relative z-10 h-16 w-full rounded-2xl" style={housing} />
-          <div aria-hidden="true" className="absolute inset-x-8 top-9 z-30 h-2 rounded-full" style={slit} />
+        {/* printer: housing at the back, paper in the middle, slit on top.
+            All widths come from two variables so the paper always fits inside the slit:
+            --w = printer width, --inset = gap between the printer edge and the slit,
+            paper = slit width minus 8px on each side. */}
+        <div className="relative flex w-[var(--w)] flex-col items-center [--inset:22px] [--w:min(440px,calc(100vw_-_32px))] sm:[--inset:32px]">
+          <div ref={printerRef} aria-hidden="true" className="relative z-10 h-16 w-full rounded-2xl" style={housing}>
+            {/* status light: lime while printing */}
+            <span
+              className="absolute right-[calc(var(--inset)_+_4px)] top-3.5 h-1.5 w-1.5 rounded-full transition duration-300"
+              style={
+                printing
+                  ? { background: LIME, boxShadow: `0 0 6px 1px ${LIME}` }
+                  : { background: '#6f7a5a', boxShadow: 'inset 0 1px 1px rgba(0,0,0,.4)' }
+              }
+            />
+          </div>
 
-        {/* the feed starts inside the slit; it clips the paper so it only shows once it's out.
-            side and bottom padding leave room for the shadow */}
-        <div className="relative z-20 -mt-[22px] overflow-hidden px-8 pb-14">
+          {/* before the first tap: a hint under the slot */}
+          {!started && (
+            <p
+              aria-hidden="true"
+              className="absolute inset-x-0 top-[92px] z-40 animate-pulse text-center font-display text-xs font-bold tracking-[.4em] text-white/70"
+            >
+              TAP TO PRINT
+              <span className="mt-2 block text-[10px] font-normal tracking-[.25em] text-white/35">sound on</span>
+            </p>
+          )}
+          <div
+            aria-hidden="true"
+            className="absolute left-[var(--inset)] right-[var(--inset)] top-9 z-30 h-2 rounded-full"
+            style={slit}
+          />
+
+        {/* the feed starts in the middle of the slit (40px down), so the paper comes out of the
+            dark gap itself; it clips the paper until it's out. bottom padding leaves room for the shadow */}
+        <div className="relative z-20 -mt-6 overflow-hidden px-6 pb-14">
           <div
             ref={shadeRef}
             aria-hidden="true"
-            className="pointer-events-none absolute inset-x-8 top-0 z-10 h-10 opacity-0"
+            className="pointer-events-none absolute inset-x-6 top-0 z-10 h-10 opacity-0"
             style={exitShade}
           />
 
           <article
             ref={receiptRef}
             aria-label="Birthday invitation"
-            className="relative w-[360px] max-w-[82vw] [transform:translateY(-100%)]"
+            className="relative w-[calc(var(--w)_-_2*var(--inset)_-_16px)] [transform:translateY(-100%)]"
           >
             <div
-              className="relative px-7 pb-7 pt-12 text-[12.5px] leading-[1.6] tracking-[.01em] sm:px-9"
+              className="relative px-6 pb-7 pt-12 text-[12px] leading-[1.6] tracking-[.01em] sm:px-9 sm:text-[12.5px]"
               style={paper}
             >
               <div className="sm:[filter:blur(.25px)]" style={ink}>
